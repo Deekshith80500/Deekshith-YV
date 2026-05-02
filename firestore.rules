@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.uid == request.auth.uid &&
+               data.name is string && data.name.size() > 0 &&
+               data.email is string &&
+               data.role in ['patient', 'doctor'] &&
+               data.address is string;
+      }
+
+      allow get: if isSignedIn() && (isOwner(userId) || (resource.data.role == 'patient' && resource.data.isSharingEnabled == true));
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role;
+    }
+
+    match /records/{recordId} {
+      function isValidRecord(data) {
+        return data.patientId == request.auth.uid &&
+               data.fileURL is string &&
+               data.type in ['prescription', 'report'] &&
+               data.createdAt is string;
+      }
+
+      allow list: if isSignedIn() && resource.data.patientId == request.auth.uid;
+      allow get: if isSignedIn() && (resource.data.patientId == request.auth.uid || get(/databases/$(database)/documents/users/$(resource.data.patientId)).data.isSharingEnabled == true);
+      allow create: if isSignedIn() && isValidRecord(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.patientId == request.auth.uid;
+    }
+  }
+}
